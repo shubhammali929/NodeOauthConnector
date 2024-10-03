@@ -4,18 +4,17 @@ const querystring = require('querystring');
 const { generateCodeVerifier, generateCodeChallenge, verifyAndDecodeToken, generateState } = require('./utils');
 
 class OAuthHandler {
-    constructor(clientId, clientSecret, baseUrl, redirectUri, authorizationUrl, tokenUrl) {
+    constructor(clientId, clientSecret, pemCertificate, baseUrl, redirectUri) {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
+        this.pemCertificate = pemCertificate;
         this.baseUrl = baseUrl;
         this.redirectUri = redirectUri;
-        this.authorizationUrl = authorizationUrl;
-        this.tokenUrl = tokenUrl;
         this.state = null;
     }
 
-    // Step 1: Get Authorization URL with PKCE support
-    getAuthorizationUrl(grantType) {
+    // Step 1: Generate and redirect to Authorization URL
+    handleAuthorizationRedirect(req, res, grantType) {
         this.state = generateState(); 
         const params = {
             response_type: 'code',
@@ -32,46 +31,54 @@ class OAuthHandler {
             const codeChallenge = generateCodeChallenge(codeVerifier);
             params.code_challenge = codeChallenge;
             params.code_challenge_method = 'S256';
-            this.codeVerifier = codeVerifier; //storing codeVerifier for further use
+            this.codeVerifier = codeVerifier; //storing codeVerifier for further verification 
         }
 
-        const authUrl = `${this.authorizationUrl}?${querystring.stringify(params)}`;
-        return authUrl;
+        const authUrl = `${this.baseUrl}moas/idp/openidsso?${querystring.stringify(params)}`;
+        res.redirect(authUrl);
     }
 
     // Step 2: Exchange Authorization Code for Token
     async exchangeCodeForToken(code, grantType, receivedState) {
-        console.log(`received state : ${receivedState}  original state : ${this.state}`);
         if (receivedState !== this.state) {
             throw new Error('Invalid state parameter. Possible CSRF attack.');
         }
+    
         const payload = {
             grant_type: 'authorization_code',
             code: code,
             redirect_uri: this.redirectUri,
             client_id: this.clientId,
         };
-
+    
         if (grantType === 'pkce' && this.codeVerifier) {
-            payload.code_verifier = this.codeVerifier;
+            payload.code_verifier = this.codeVerifier; // Add code_verifier for PKCE
         } else {
-            payload.client_secret = this.clientSecret;
+            payload.client_secret = this.clientSecret; // Add client_secret for normal OAuth flow
         }
-
-        const response = await axios.post(this.tokenUrl, querystring.stringify(payload), {
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-        });
-
-        const tokenData = response.data;
-
-        if (tokenData.id_token) {
-            tokenData.user_data = await verifyAndDecodeToken(tokenData.id_token);
+    
+        try {
+            const response = await axios.post(`${this.baseUrl}moas/rest/oauth/token`, querystring.stringify(payload), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+            });
+    
+            const tokenData = response.data;
+    
+            const user_data = await verifyAndDecodeToken(tokenData.id_token, this.pemCertificate);
+    
+            if (!user_data) {
+                throw new Error('No user data found in token response.');
+            }
+    
+            return user_data;
+        } catch (error) {
+            // Handle errors (including token request failure or decoding issue)
+            throw new Error(`Failed to exchange code for token: ${error.message}`);
         }
-
-        return tokenData;
     }
+
 
     async getUserInfoUsingPasswordGrant(username, password) {
         try {
@@ -92,7 +99,7 @@ class OAuthHandler {
             const tokenData = response.data;
             const id_token = tokenData.id_token;
 
-            const userInfo = await verifyAndDecodeToken(id_token);
+            const userInfo = await verifyAndDecodeToken(id_token, this.pemCertificate);
             return userInfo;
 
         } catch (error) {
@@ -105,6 +112,11 @@ class OAuthHandler {
             }
             throw error;
         }
+    }
+
+    logout(req,res){
+        const logoutUrl = `${this.baseUrl}moas/idp/oidc/logout?post_logout_redirect_uri=${this.redirectUri}`;
+        res.redirect(logoutUrl);
     }
 }
 

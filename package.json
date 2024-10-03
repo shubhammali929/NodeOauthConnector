@@ -1,0 +1,23 @@
+{
+  "name": "node_oauth_test",
+  "version": "1.0.0",
+  "main": "OAuthHandler.js",
+  "scripts": {
+    "test": "npm run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shubhammali929/NodeOauthConnector.git"
+  },
+  "keywords": [
+    "npm",
+    "node_oauth"
+  ],
+  "author": "Shubham Mali",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/shubhammali929/NodeOauthConnector/issues"
+  },
+  "homepage": "https://github.com/shubhammali929/NodeOauthConnector#readme",
+  "description": ""
+}
